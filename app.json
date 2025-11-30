@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "ssei",
+    "slug": "snack-b3e99b61-2b99-4644-ace2-c210fa71ffb5",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ssei.app"
+    },
+    "android": {
+      "package": "com.ssei.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "43dfda63-c3eb-4ecc-a468-e7dada5be2f2"
+      }
+    }
+  }
+}

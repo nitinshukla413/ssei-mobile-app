@@ -1,0 +1,267 @@
+import React, { useRef, useState } from 'react';
+import {
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  Text,
+  Alert,
+  BackHandler,
+  Platform,
+  Linking,
+  StatusBar,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {WebView} from 'react-native-webview';
+// Your web app URL
+// If you see nginx welcome page, try these alternatives:
+// - http://betassei.co.in:3000 (if app runs on port 3000)
+// - http://betassei.co.in:1234 (if app runs on port 1234)
+// - https://betassei.co.in (if HTTPS is configured)
+// - http://betassei.co.in/dashboard (if app needs a path)
+const WEB_APP_URL = 'https://betassei.co.in/dashboard';
+
+interface WebViewScreenProps {
+  token: string;
+  onLogout: () => void;
+}
+
+const WebViewScreen: React.FC<WebViewScreenProps> = ({ token, onLogout }) => {
+  const webViewRef = useRef<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [canGoBack, setCanGoBack] = useState(false);
+  
+  // Check if WebView is available (not available on web platform)
+  const isWebViewAvailable = WebView !== null;
+
+  // Inject JavaScript to set token in localStorage
+  const injectedJavaScript = `
+    (function() {
+      // Store token in localStorage
+      localStorage.setItem('AUTH_TOKEN', '${token}');
+      
+      // Also set in sessionStorage if needed
+      sessionStorage.setItem('AUTH_TOKEN', '${token}');
+      
+      // Dispatch event to notify web app
+      window.dispatchEvent(new Event('tokenReady'));
+      
+      // If your web app uses a specific auth store format
+      const authData = {
+        token: '${token}',
+        isAuthenticated: true
+      };
+      localStorage.setItem('AUTH_STORE', JSON.stringify(authData));
+      
+      true; // Required for iOS
+    })();
+  `;
+
+  const handleNavigationStateChange = (navState: any) => {
+    setCanGoBack(navState.canGoBack);
+    setLoading(navState.loading);
+  };
+
+  const handleBackPress = () => {
+    if (canGoBack && webViewRef.current) {
+      webViewRef.current.goBack();
+      return true;
+    }
+    return false;
+  };
+
+  // Handle Android back button
+  React.useEffect(() => {
+    if (Platform.OS === 'android') {
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+      return () => backHandler.remove();
+    }
+  }, [canGoBack]);
+
+  // Open in browser if WebView not available (web platform)
+  const openInBrowser = async () => {
+    const url = `${WEB_APP_URL}?token=${token}`;
+    const supported = await Linking.canOpenURL(url);
+    if (supported) {
+      await Linking.openURL(url);
+    } else {
+      Alert.alert('Error', 'Cannot open URL');
+    }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            await AsyncStorage.removeItem('AUTH_STORE');
+            await AsyncStorage.removeItem('AUTH_TOKEN');
+            onLogout();
+          },
+        },
+      ]
+    );
+  };
+
+  // If WebView is not available (web platform), show fallback
+  if (!isWebViewAvailable) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#0436A4" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.fallbackContainer}>
+          <Text style={styles.fallbackTitle}>WebView Not Available</Text>
+          <Text style={styles.fallbackText}>
+            WebView is only available on iOS and Android devices.
+          </Text>
+          <Text style={styles.fallbackText}>
+            Please test on a physical device or emulator.
+          </Text>
+          <TouchableOpacity 
+            style={styles.openButton} 
+            onPress={openInBrowser}
+          >
+            <Text style={styles.openButtonText}>Open in Browser</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#0436A4" />
+      {/* Optional: Header with logout button */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
+     <WebView
+  ref={webViewRef}
+  source={{ uri: WEB_APP_URL }}
+  style={styles.webview}
+  injectedJavaScript={injectedJavaScript}
+  onNavigationStateChange={handleNavigationStateChange}
+  onLoadStart={() => setLoading(true)}
+  javaScriptEnabled={true}
+  domStorageEnabled={true}
+  sharedCookiesEnabled={true}
+  startInLoadingState={true}
+  originWhitelist={['*']} // allow redirects / external hosts while debugging
+  mixedContentMode="always" // Android: allow https/http mixed content
+  onShouldStartLoadWithRequest={(request: any) => {
+    // TEMPORARY: allow everything while debugging
+    console.log('WILL LOAD:', request.url);
+    return true;
+  }}
+  // Add this to receive messages from injected JS
+  
+  onLoadEnd={(e) => {
+    // Ask page to post back its location + small snippet to RN
+    webViewRef.current?.injectJavaScript(`
+      (function() {
+        try {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            url: window.location.href,
+            title: document.title,
+            bodySnippet: (document.body && (document.body.innerText || document.body.textContent) || '').slice(0,300)
+          }));
+        } catch (err) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ error: err.toString() }));
+        }
+      })();
+      true;
+    `);
+  }}
+/>
+
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#0436A4" />
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    height: Platform.OS === 'ios' ? 90 : 60,
+    backgroundColor: '#0436A4',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: Platform.OS === 'ios' ? 40 : StatusBar.currentHeight || 0,
+  },
+  logoutButton: {
+    padding: 8,
+  },
+  logoutText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  webview: {
+    flex: 1,
+  },
+  loadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  fallbackContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff',
+  },
+  fallbackTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    color: '#000',
+  },
+  fallbackText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 12,
+    color: '#666',
+  },
+  openButton: {
+    marginTop: 24,
+    backgroundColor: '#0436A4',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 6,
+  },
+  openButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+
+export default WebViewScreen;
+
