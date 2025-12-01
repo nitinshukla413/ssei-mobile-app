@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
+import { useSecurityCheck } from '../hooks/useSecurityCheck';
+import SecurityWarning from '../components/SecurityWarning';
 
 // Your web app URL
 const WEB_APP_URL = 'https://betassei.co.in';
@@ -26,6 +28,76 @@ const WebViewScreen: React.FC<WebViewScreenProps> = ({ token, onLogout }) => {
   const webViewRef = useRef<any>(null);
   const [loading, setLoading] = useState(true);
   const [canGoBack, setCanGoBack] = useState(false);
+  const [showSecurityWarning, setShowSecurityWarning] = useState(false);
+  const [shouldBlockContent, setShouldBlockContent] = useState(false);
+
+  // Pause video playback in WebView when security violation detected
+  const pauseVideoPlayback = React.useCallback(() => {
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          try {
+            // Pause all video elements
+            const videos = document.querySelectorAll('video');
+            videos.forEach(video => {
+              if (!video.paused) {
+                video.pause();
+                console.log('Video paused due to security violation');
+              }
+            });
+            
+            // Pause audio elements
+            const audios = document.querySelectorAll('audio');
+            audios.forEach(audio => {
+              if (!audio.paused) {
+                audio.pause();
+              }
+            });
+            
+            // Notify Shaka Player if available
+            if (window.shaka && window.shakaPlayerInstance) {
+              try {
+                window.shakaPlayerInstance.pause();
+              } catch (e) {
+                console.log('Shaka player pause error:', e);
+              }
+            }
+            
+            // Dispatch event to notify web app
+            window.dispatchEvent(new CustomEvent('securityViolation', {
+              detail: { message: 'Security violation detected. Playback paused.' }
+            }));
+          } catch (error) {
+            console.error('Error pausing playback:', error);
+          }
+        })();
+        true;
+      `);
+    }
+  }, []);
+
+  // Handle security violations
+  const handleSecurityViolation = React.useCallback((violations: string[]) => {
+    console.warn('🚨 Security violations detected:', violations);
+    setShowSecurityWarning(true);
+    setShouldBlockContent(true);
+    // Pause video playback in WebView
+    pauseVideoPlayback();
+  }, [pauseVideoPlayback]);
+
+  // Security checks
+  const {
+    securityStatus,
+    isSecure,
+    violations,
+  } = useSecurityCheck({
+    blockOnRoot: true,
+    blockOnJailbreak: true,
+    blockOnDeveloperMode: true,
+    blockOnScreenRecording: true,
+    enableScreenshotBlock: true,
+    onViolation: handleSecurityViolation,
+  });
 
   // Inject JavaScript to properly initialize Zustand auth store
   // The web app uses Zustand persist which stores data in a specific format
@@ -111,6 +183,37 @@ const WebViewScreen: React.FC<WebViewScreenProps> = ({ token, onLogout }) => {
     }
   };
 
+
+  // Handle security warning close
+  const handleSecurityWarningClose = () => {
+    setShowSecurityWarning(false);
+    // Re-check security
+    if (isSecure) {
+      setShouldBlockContent(false);
+    }
+  };
+
+  // Handle exit app
+  const handleExitApp = () => {
+    Alert.alert(
+      'Exit App',
+      'The app will close due to security violations.',
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            // Exit app (Android)
+            if (Platform.OS === 'android') {
+              BackHandler.exitApp();
+            }
+            // On iOS, we can't force exit, but we can logout
+            onLogout();
+          },
+        },
+      ]
+    );
+  };
+
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
@@ -130,9 +233,45 @@ const WebViewScreen: React.FC<WebViewScreenProps> = ({ token, onLogout }) => {
     );
   };
 
+  // Monitor security status and pause video if violations occur
+  useEffect(() => {
+    if (!isSecure && violations.length > 0) {
+      pauseVideoPlayback();
+    }
+  }, [isSecure, violations]);
+
+  // Block content overlay when security violation detected
+  const renderSecurityOverlay = () => {
+    if (shouldBlockContent && !isSecure) {
+      return (
+        <View style={styles.securityOverlay}>
+          <View style={styles.securityBlockContainer}>
+            <Text style={styles.securityBlockTitle}>⚠️ Security Alert</Text>
+            <Text style={styles.securityBlockText}>
+              Content playback is blocked due to security violations.
+            </Text>
+            <Text style={styles.securityBlockSubtext}>
+              Please resolve the security issues to continue.
+            </Text>
+          </View>
+        </View>
+      );
+    }
+    return null;
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0436A4" />
+      
+      {/* Security Warning Modal */}
+      <SecurityWarning
+        visible={showSecurityWarning}
+        violations={violations}
+        onClose={handleSecurityWarningClose}
+        onExit={handleExitApp}
+      />
+
       {/* Optional: Header with logout button */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
@@ -220,6 +359,18 @@ const WebViewScreen: React.FC<WebViewScreenProps> = ({ token, onLogout }) => {
         startInLoadingState={true}
         originWhitelist={['*']}
         mixedContentMode="always"
+        // Critical props for DRM/EME video playback
+        allowsInlineMediaPlayback={true}
+        mediaPlaybackRequiresUserAction={false}
+        allowsProtectedMedia={true}
+        allowsFullscreenVideo={true}
+        // Android hardware acceleration for better video performance
+        androidHardwareAccelerationDisabled={false}
+        // iOS specific
+        bounces={false}
+        scrollEnabled={true}
+        // Allow all content types including DRM
+        allowsBackForwardNavigationGestures={true}
         onShouldStartLoadWithRequest={(request: any) => {
           // Allow navigation within your domain and related domains
           console.log('WILL LOAD:', request.url);
@@ -246,6 +397,9 @@ const WebViewScreen: React.FC<WebViewScreenProps> = ({ token, onLogout }) => {
           <ActivityIndicator size="large" color="#0436A4" />
         </View>
       )}
+
+      {/* Security Block Overlay */}
+      {renderSecurityOverlay()}
     </View>
   );
 };
@@ -284,6 +438,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  securityOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  securityBlockContainer: {
+    backgroundColor: '#1F2937',
+    borderRadius: 12,
+    padding: 24,
+    margin: 20,
+    maxWidth: 400,
+    alignItems: 'center',
+  },
+  securityBlockTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#DC2626',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  securityBlockText: {
+    fontSize: 16,
+    color: '#F3F4F6',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  securityBlockSubtext: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });
 

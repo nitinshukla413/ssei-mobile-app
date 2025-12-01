@@ -7,6 +7,9 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "plugins": [
+      "expo-dev-client"
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -14,7 +17,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ssei.app"
+      "bundleIdentifier": "com.ssei.app",
+      "infoPlist": {
+        "NSAllowsArbitraryLoadsInWebContent": true,
+        "NSAllowsArbitraryLoads": true
+      }
     },
     "android": {
       "package": "com.ssei.app",
@@ -23,14 +30,22 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
+      "blockedPermissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {
-        "projectId": "43dfda63-c3eb-4ecc-a468-e7dada5be2f2"
+        "projectId": "fd18200e-76f2-4bfc-9813-c4d051ae3106"
       }
     }
   }
